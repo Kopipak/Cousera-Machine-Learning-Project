@@ -1,0 +1,130 @@
+
+# Practical machine learning project (Human Activity Recognition)
+
+## Aim
+
+1.Use variables to predict "classe" variable in the training set  
+2.Use your prediction model to predict 20 different test cases. 
+
+## DATA
+- Training data
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+- Test data
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+- Data source
+http://groupware.les.inf.puc-rio.br/har.
+
+
+###Load data
+```{r, message=FALSE, warning=FALSE}
+library(ggplot2); library(caret);
+setwd("~/R/Cousera R/Machine learning")
+har <- read.csv("pml-training.csv", header=TRUE, na.strings = c("NA",""," "))
+#summary(har)
+```
+
+Many columns have NA's = 19216. 
+Remove columns occupied with NA over 90%.
+Remove columns which is irrelevant to human activity: "X","user_name", "raw_timestamp_part_1", "raw_timestamp_part_2", "cvtd_timestamp", "new_window", "num_window".
+
+```{r}
+NAnum <-apply(is.na(har),2,sum)
+NAcol <- NAnum > nrow(har)*0.9
+har <- har[,!NAcol]
+har <- har[,8:60]
+```
+
+Genarate training and testing dataset
+```{r, message=FALSE, warning=FALSE}
+inTrain <- createDataPartition(y = har$classe, p = 0.4, list = FALSE)
+training <- har[inTrain,]
+testing <- har[-inTrain,] 
+```
+
+First I tried 4 models (Decision tree, Naive Bayes, Random forest, Gradient boosting model) to choose best classification model for this dataset.
+
+```{r, message=FALSE, warning=FALSE}
+library(doSNOW)
+cls<-makeCluster(6) # Number of cores you want to use
+registerDoSNOW(cls) # Register the cores.
+
+moddt <- train(classe ~ ., method= "rpart", data= training)               #Decision tree
+modnb <- train(classe ~ ., data=training, method="nb")                    #Naive Bayes
+modrf <- train(classe ~ ., data= training, method= "rf", prox= TRUE)      #Random forest
+modgbm <- train(classe ~ ., method= "gbm",data= training, verbose=FALSE)  #Gradient boosting model
+
+stopCluster(cls)  # Free up your cores again.
+
+```
+
+Random forest model(modrf) was highest accuracy >0.95. 
+Next I tuned this model by the number of folds in K-fold cross-validation
+
+```{r, message=FALSE, warning=FALSE}
+cls<-makeCluster(6) # Number of cores you want to use
+registerDoSNOW(cls) # Register the cores.
+
+modrf5 <- train(classe ~ ., data = training, method = "rf", trControl = trainControl(method = "repeatedcv", number = 5, repeats = 3))    
+# Random forest with 5 fold cross validation
+modrf10 <- train(classe ~ ., data = training, method = "rf", trControl = trainControl(method = "repeatedcv", number = 10, repeats = 3))    
+# Random forest with 10 fold cross validation
+modrf20 <- train(classe ~ ., data = training, method = "rf", trControl = trainControl(method = "repeatedcv", number = 20, repeats = 3))    
+# Random forest with 20 fold cross validation
+
+modrf5
+modrf10
+modrf20
+```
+
+20 fold cross-validation model(modrf20) was the highest accuracy in training dataset. Higher number of corss validation reduced the error.
+Then I tested these models using tesing dataset(part of training dataset). 
+
+### Check random forest model -- best
+```{r, message=FALSE, warning=FALSE}
+predrf5 <- predict(modrf5,testing)
+table(predrf5,testing$classe)
+predrf10 <- predict(modrf10,testing)
+table(predrf10,testing$classe)
+predrf20 <- predict(modrf20,testing)
+table(predrf20,testing$classe)
+
+testing$predrf20Right <- predrf20==testing$classe
+qplot(roll_belt, magnet_dumbbell_y, colour=classe, data=testing)
+qplot(roll_belt, magnet_dumbbell_y,colour=predrf20Right,data=testing,main="Random forest Predictions")
+
+```
+
+### Check other models
+
+Other models are also visually inspected.
+To estimate the out of sample error the plots of prediction results were generated.
+
+Check decision tree model --  worst
+```{r, message=FALSE, warning=FALSE}
+#library(rattle)
+#library(rpart.plot)
+#fancyRpartPlot(moddt$finalModel)
+preddt <- predict(moddt,testing); testing$preddtRight <- preddt==testing$classe
+table(preddt,testing$classe)
+
+qplot(roll_belt, magnet_dumbbell_y,colour=preddtRight,data=testing,main="Decision tree Predictions")
+```
+
+Check gradient boosting model -- work
+```{r, message=FALSE, warning=FALSE}
+predgbm <- predict(modgbm,testing); testing$predgbmRight <- predgbm==testing$classe
+table(predgbm,testing$classe)
+qplot(roll_belt, magnet_dumbbell_y,colour=predgbmRight,data=testing,main="Gradient boosting Predictions")
+````
+
+Check Naive Bayes model -- work
+```{r, message=FALSE, warning=FALSE}
+prednb <- predict(modnb,testing); testing$prednbRight <- prednb==testing$classe
+table(prednb,testing$classe)
+qplot(roll_belt, magnet_dumbbell_y,colour=prednbRight,data=testing,main="Naive Bayes Predictions")
+stopCluster(cls)
+```
+
+## Final model
+From the results above, I decided to use random forest "modrf20" model for the prediction.
+
